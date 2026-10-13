@@ -1,0 +1,55 @@
+# Excluded from the build context sent to the Docker daemon.
+#
+# Two jobs: keep secrets out of the image layers, and keep the context small
+# (node_modules alone is hundreds of megabytes).
+
+# Secrets and local config. The *tracked* .env.example files stay in, since the
+# compose file needs no content from them and the backend image must never see
+# a real credential.
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Version control and editor state
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info
+**/.venv
+venv/
+
+# Node — reinstalled inside the build stage from the lockfile
+**/node_modules
+frontend/dist
+
+# Notebooks: large, and the outputs are not part of any image
+**/.ipynb_checkpoints
+
+# Data and weights: mounted as volumes, never baked into an image
+data/
+ml/weights/
+**/uploads/
+*.db
+*.sqlite
+*.sqlite3
+*.pt
+*.pth
+
+# Docs and tests are not needed at runtime
+**/tests/
+**/test_*.py
+**/*_test.js
+**/*_test.jsx

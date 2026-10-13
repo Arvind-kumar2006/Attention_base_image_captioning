@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+python-multipart
+pillow
+pytest
+httpx
+# PostgreSQL driver for the compose stack (DATABASE_URL uses postgresql+psycopg).
+# The local default is sqlite, which needs no driver.
+psycopg[binary]

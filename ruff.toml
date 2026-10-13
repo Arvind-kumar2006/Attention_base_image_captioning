@@ -1,0 +1,54 @@
+# Ruff configuration. The rule set is deliberately narrow: correctness rules
+# that catch real defects, not a stylistic sweep across the whole codebase.
+target-version = "py310"
+line-length = 100
+extend-exclude = ["frontend", "ml/notebooks", "**/__pycache__"]
+
+[lint]
+select = [
+    "F",        # pyflakes: unused imports/names, undefined names, redefinitions
+    "E",        # pycodestyle errors
+    "W",        # pycodestyle warnings
+    "I",        # isort: import ordering
+    "B",        # flake8-bugbear
+    "C4",       # comprehensions
+    "RUF",      # ruff-specific rules
+    "SIM",      # simplifications
+    "PIE",      # misc lints
+]
+
+ignore = [
+    # FastAPI's dependency-injection idiom *is* a call in an argument default.
+    # Flagging it would mean ignoring every route in the codebase.
+    "B008",
+    # E501 is handled by the formatter; ruff's line-length check duplicates it
+    # noisily on long prose in docstrings and SQL-ish strings.
+    "E501",
+    # Deliberate: the API's `detail` messages are user-facing prose and belong
+    # at the raise site, not on a custom exception class.
+    "TRY003",
+    # Deliberate: `zip` over a caption and its id list, where a mismatch would
+    # be a logic error caught by the shape assertions around it.
+    "B905",
+    # Deliberate: `_unused` names mark test fixtures kept for symmetry.
+    "RUF059",
+]
+
+[lint.flake8-tidy-imports]
+# Relative imports are used inside packages on purpose: ml/train.py and
+# backend/app/main.py both fall back to them for direct script execution.
+ban-relative-imports = "parents"
+
+[lint.per-file-ignores]
+# Test modules build fixtures with names that look unused to a static reader.
+"ml/tests/*" = ["F811", "RUF012", "SIM117"]
+"backend/tests/*" = ["F811", "B011", "E402"]
+# The notebook checkers exec generated source by design.
+"scripts/*" = ["S102", "F821"]
+
+[lint.isort]
+known-first-party = ["backend", "captioning", "ml"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

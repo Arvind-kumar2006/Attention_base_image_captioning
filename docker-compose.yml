@@ -1,0 +1,120 @@
+# Lumina: nginx (SPA + API proxy), the FastAPI backend, and PostgreSQL.
+#
+# Only nginx publishes a port. Postgres and the API stay on the compose network
+# and are unreachable from the host.
+#
+#   cp .env.example .env   # set POSTGRES_PASSWORD (compose refuses without it)
+#   docker compose up --build
+#
+# Then open http://localhost:8080
+#
+# The API starts degraded, without a checkpoint, and reports it: captions return
+# 503 and the frontend banner explains why. The stack still comes up, so you can
+# seed a model into the weights volume and reload.
+#
+# The api mounts that volume read-only, so `docker compose cp` cannot write to
+# it. Seed it with a throwaway container instead, naming the same volume:
+#
+#   docker run --rm -v lumina_weights:/dst -v "$PWD/ml/weights:/src:ro" \
+#     alpine cp /src/best.pt /dst/
+#   echo 'CHECKPOINT_FILE=best.pt' >> .env
+#   docker compose up -d
+
+name: lumina
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Same-origin by default: nginx proxies /api, so the client needs no
+        # host-specific URL and the build is portable.
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    image: lumina-frontend
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: lumina-api
+    restart: unless-stopped
+    environment:
+      # Connection string assembled from the .env password, so the credential
+      # exists in exactly one place and never in an image layer.
+      DATABASE_URL: postgresql+psycopg://lumina:${POSTGRES_PASSWORD}@postgres:5432/lumina
+      DATABASE_ECHO: "false"
+      CHECKPOINT_PATH: /app/weights/${CHECKPOINT_FILE:-best.pt}
+      UPLOAD_DIR: /app/uploads
+      DEVICE: cpu
+      # nginx's origin. Add more as a comma-separated list if you run several.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+    volumes:
+      # Read-only: the container must not be able to modify trained weights.
+      - weights:/app/weights:ro
+      - uploads:/app/uploads
+    # Deliberately no `ports:`. The api is only reachable through nginx, which
+    # is also what makes --forwarded-allow-ips "*" safe in the Dockerfile.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Torch import plus the ResNet load; generous on a cold, slow host.
+      start_period: 120s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lumina}
+      POSTGRES_USER: ${POSTGRES_USER:-lumina}
+      # No default: compose fails fast if POSTGRES_PASSWORD is unset rather
+      # than booting a database with a guessable password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No `ports:` on purpose. The database is never published to the host.
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lumina} -d ${POSTGRES_DB:-lumina}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  lumina:
+    driver: bridge
+
+volumes:
+  # Named volumes, not bind mounts, so the data survives `docker compose down`
+  # and stays out of the repository.
+  pgdata:
+  # Trained checkpoints. Populated out of band, since .dockerignore keeps them
+  # out of the build context and the api mount is read-only:
+  #   docker compose cp ml/weights/best.pt api:/app/weights/best.pt
+  # Or bind-mount a local directory instead by replacing this with
+  #   - ./ml/weights:/app/weights:ro
+  weights:
+  uploads:

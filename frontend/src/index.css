@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+
+/*
+  Design tokens. Every foreground/background pair used for text below meets
+  WCAG AA (4.5:1) on its intended background; the two pairs are marked.
+  Do not lighten --fg-muted past #52606d or it drops below 4.5:1 on white.
+*/
+@theme {
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #d4d9e0;
+  --color-border-strong: #9aa5b1;
+
+  /* #1a2027 on white = 15.1:1 */
+  --color-fg: #1a2027;
+  /* #52606d on white = 6.1:1 */
+  --color-fg-muted: #52606d;
+
+  /* #ffffff on #1f5f8b = 5.9:1 */
+  --color-accent: #1f5f8b;
+  --color-accent-hover: #17496b;
+  --color-accent-soft: #e8f0f7;
+
+  /* #ffffff on #8a2f2f = 6.3:1 */
+  --color-danger: #8a2f2f;
+  --color-danger-soft: #fbeaea;
+  --color-success: #1f6b45;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-fg antialiased;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+      sans-serif;
+  }
+
+  /*
+    A visible focus ring on every interactive element. :focus-visible keeps it
+    off for mouse clicks but guarantees it for keyboard users.
+  */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  /* Never remove the ring without replacing it. */
+  :where(a, button, input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-surface;
+  }
+
+  /*
+    Tailwind v4 cannot @apply one custom component class from another, so the
+    shared button layout is repeated rather than composed.
+  */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+      text-sm font-semibold transition-colors
+      bg-accent text-white hover:bg-accent-hover
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+      text-sm font-semibold transition-colors
+      border border-border-strong bg-surface text-fg hover:bg-canvas
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5
+      text-sm text-fg placeholder:text-fg-muted;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-fg;
+  }
+
+  .muted {
+    @apply text-fg-muted;
+  }
+}
+
+/* Respect a reduced-motion preference: no skeleton shimmer, no transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref rather than queueing them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CPU-only torch for every job: the model never uses CUDA, and the default
+  # index would pull ~2 GB of runtime libraries each runner does not need.
+  PIP_EXTRA_INDEX_CPU: https://download.pytorch.org/whl/cpu
+  # Keep the ResNet weights out of the runner's real HOME so a later job cannot
+  # silently rely on them being cached.
+  TORCH_HOME: ${{ github.workspace }}/.torch-cache
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      # `ruff format` is available but deliberately not enforced: adopting it
+      # would rewrite 23 existing files, which is churn rather than a fix. Run
+      # `ruff format .` when you want it, on a commit of its own.
+
+  python:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            ml/requirements.txt
+            backend/requirements.txt
+
+      - name: Install torch (CPU wheels)
+        run: |
+          python -m pip install --upgrade pip
+          # Installed before the requirements files: --index-url replaces PyPI,
+          # so torch must be resolved against the CPU index explicitly and the
+          # rest from PyPI afterwards.
+          python -m pip install --index-url "${PIP_EXTRA_INDEX_CPU}" torch torchvision
+          python -m pip install -r ml/requirements.txt
+          python -m pip install -r backend/requirements.txt
+
+      - name: Install the ml package
+        run: python -m pip install --no-deps -e ml/
+
+      - name: Cache the ResNet weights
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TORCH_HOME }}
+          key: torch-home-${{ matrix.python-version }}-${{ hashFiles('ml/captioning/encoder.py') }}
+
+      - name: pytest (ml)
+        working-directory: ml
+        run: python -m pytest tests -q --maxfail=1
+
+      - name: pytest (backend)
+        run: python -m pytest backend/tests -q --maxfail=1
+
+      - name: pytest (the five PRD acceptance tests)
+        run: python -m pytest -m prd -v
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build-only: this proves both images assemble. The Docker daemon is not
+      # shared with CI, so they are not started or integration-tested here.
+      - name: Build the backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate the compose file
+        # POSTGRES_PASSWORD is required and has no default, so a dummy value is
+        # supplied here only to let `config` interpolate it.
+        run: POSTGRES_PASSWORD=ci-only-not-a-real-secret docker compose config -q
+
+  prd:
+    name: PRD acceptance
+    runs-on: ubuntu-latest
+    # Explicit job so the five requirements report as their own gate rather than
+    # being buried in the python matrix.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url "${PIP_EXTRA_INDEX_CPU}" torch torchvision
+          python -m pip install -r ml/requirements.txt
+          python -m pip install -r backend/requirements.txt
+          python -m pip install --no-deps -e ml/
+
+      - name: TEST-01 encoder output shape
+        run: python -m pytest -m "prd and test_01" -v
+
+      - name: TEST-02 attention weights sum to 1
+        run: python -m pytest -m "prd and test_02" -v
+
+      - name: TEST-03 caption is persisted
+        run: python -m pytest -m "prd and test_03" -v
+
+      - name: TEST-04 corrupt upload returns 400
+        run: python -m pytest -m "prd and test_04" -v
+
+      - name: TEST-05 caption within the latency target
+        run: python -m pytest -m "prd and test_05" -v

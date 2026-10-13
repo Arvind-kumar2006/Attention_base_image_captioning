@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "captioning"
+version = "0.1.0"
+description = "Attention-based image captioning (Show, Attend and Tell, Xu et al. 2015) in PyTorch"
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "torchvision",
+    "pillow",
+    "tqdm",
+    "numpy",
+]
+
+[project.optional-dependencies]
+eval = ["nltk", "pycocoevalcap", "matplotlib"]
+dev = ["pytest"]
+
+[tool.setuptools]
+# Flat layout: the importable package is ml/captioning, exposed as `captioning`.
+packages = ["captioning"]
+
+[tool.setuptools.package-dir]
+captioning = "captioning"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
